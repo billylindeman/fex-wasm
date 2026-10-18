@@ -106,7 +106,7 @@ struct FlexBitSet final {
       }
     }
 
-    return BitsetScanResults {~0ULL, FoundHole};
+    return BitsetScanResults {static_cast<size_t>(~0ULL), FoundHole};
   }
 
   // @param BeginningElement - The first element in the set to start scanning from.
@@ -150,7 +150,7 @@ struct FlexBitSet final {
       }
     }
 
-    return BitsetScanResults {~0ULL, FoundHole};
+    return BitsetScanResults {static_cast<size_t>(~0ULL), FoundHole};
   }
 
   // This very explicitly doesn't let you take an address

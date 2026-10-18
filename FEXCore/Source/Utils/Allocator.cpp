@@ -23,8 +23,10 @@
 #include <fcntl.h>
 #ifndef _WIN32
 #include <sys/mman.h>
+#if !defined(__wasm__)
 #include <sys/resource.h>
 #include <sys/user.h>
+#endif
 #include <unistd.h>
 #endif
 
@@ -298,11 +300,14 @@ fextl::vector<MemoryRegion> StealMemoryRegion(uintptr_t Begin, uintptr_t End) {
       const size_t HostPageSize = PageSize > 0 ? PageSize : FEXCore::Utils::FEX_PAGE_SIZE;
 
       // Allocate RLIMIT_STACK worth of memory for the main thread stack, or 64MB if no limit is set.
-      struct rlimit StackLimit {};
       size_t Size = 1ULL << 26;
+#if !defined(__wasm__)
+      // WASI: no getrlimit; keep the 64MB default.
+      struct rlimit StackLimit {};
       if (getrlimit(RLIMIT_STACK, &StackLimit) == 0 && StackLimit.rlim_cur != RLIM_INFINITY) {
         Size = std::max<size_t>(FEXCore::AlignUp(StackLimit.rlim_cur, HostPageSize), HostPageSize);
       }
+#endif
       Size = std::min(Size, StackRegionIt->Size);
 
       // Reserve all of the memory between the top of the stack, and the start of the next region.

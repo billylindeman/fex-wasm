@@ -226,12 +226,27 @@ void* malloc(size_t size) {
 void* calloc(size_t n, size_t size) {
   return ::calloc(n, size);
 }
+#if defined(__wasm__)
+// WASI libc has no memalign/valloc; route through the C11 aligned interfaces.
+// WASI page size is 64 KiB (wasm page size).
+void* memalign(size_t align, size_t s) {
+  void* Ptr = nullptr;
+  if (posix_memalign(&Ptr, align, s) != 0) {
+    return nullptr;
+  }
+  return Ptr;
+}
+void* valloc(size_t size) {
+  return aligned_alloc(64 * 1024, size);
+}
+#else
 void* memalign(size_t align, size_t s) {
   return ::memalign(align, s);
 }
 void* valloc(size_t size) {
   return ::valloc(size);
 }
+#endif
 int posix_memalign(void** r, size_t a, size_t s) {
   return ::posix_memalign(r, a, s);
 }

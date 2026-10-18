@@ -11,7 +11,9 @@
 #include <cstddef>
 #include <memory_resource>
 namespace fex_pmr = std::pmr;
+#if !defined(__wasm__)
 #include <sys/user.h>
+#endif
 
 #include <mutex>
 

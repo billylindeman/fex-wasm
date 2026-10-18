@@ -125,7 +125,12 @@ inline void VirtualFree(void* Ptr, size_t Size) {
   FEXCore::Allocator::munmap(Ptr, Size);
 }
 inline void VirtualDontNeed(void* Ptr, size_t Size, bool Recommit = true) {
+#if defined(__wasm__)
+  // WASI: no page hints; wasm memory has no physical backing to advise on.
+  (void)Ptr; (void)Size; (void)Recommit;
+#else
   ::madvise(reinterpret_cast<void*>(Ptr), Size, MADV_DONTNEED);
+#endif
 }
 inline bool VirtualProtect(void* Ptr, size_t Size, ProtectOptions options) {
   int prot {PROT_NONE};
@@ -143,7 +148,12 @@ inline bool VirtualProtect(void* Ptr, size_t Size, ProtectOptions options) {
 }
 
 inline void VirtualTHPControl(const void* Ptr, size_t Size, THPControl Control) {
+#if defined(__wasm__)
+  // WASI: no transparent-hugepage advice (see VirtualDontNeed).
+  (void)Ptr; (void)Size; (void)Control;
+#else
   ::madvise(const_cast<void*>(Ptr), Size, Control == THPControl::Enable ? MADV_HUGEPAGE : MADV_NOHUGEPAGE);
+#endif
 }
 
 #endif

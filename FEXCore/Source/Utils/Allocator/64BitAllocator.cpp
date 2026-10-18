@@ -24,7 +24,9 @@
 #include <new>
 #include <sys/mman.h>
 #include <sys/utsname.h>
+#if !defined(__wasm__)
 #include <sys/user.h>
+#endif
 #include <type_traits>
 #include <utility>
 
