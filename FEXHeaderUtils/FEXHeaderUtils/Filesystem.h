@@ -10,8 +10,12 @@
 #include <memory_resource>
 #include <string_view>
 #ifndef _WIN32
+#if defined(__wasm__)
+#include <limits.h>
+#else
 #include <linux/limits.h>
 #include <sys/sendfile.h>
+#endif
 #else
 #include <filesystem>
 #endif
@@ -216,7 +220,11 @@ inline bool CopyFile(const fextl::string& From, const fextl::string& To, CopyOpt
       close(SourceFD);
       return false;
     }
-    bool Result = sendfile(DestinationFD, SourceFD, nullptr, buf.st_size) == buf.st_size;
+    #if defined(__wasm__)
+  bool Result = false; // sendfile unavailable on WASI
+#else
+  bool Result = sendfile(DestinationFD, SourceFD, nullptr, buf.st_size) == buf.st_size;
+#endif
     close(DestinationFD);
     close(SourceFD);
     return Result;

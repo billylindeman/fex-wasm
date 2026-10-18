@@ -51,7 +51,16 @@ namespace FHU::Syscalls {
 #define SYS_pidfd_open 434
 #endif
 
-#ifndef _WIN32
+#if defined(__wasm__)
+// WASI: no raw syscalls. Stub; the embedded frontend provides real impls where needed.
+inline int32_t getcpu(uint32_t* cpu, uint32_t* node) { if (cpu) *cpu = 0; if (node) *node = 0; return 0; }
+inline int32_t gettid() { return 1; }
+inline int32_t tgkill(pid_t, int32_t, int) { return 0; }
+inline int32_t statx(int, const char*, int32_t, uint32_t, void*) { return -1; }
+inline int32_t renameat2(int, const char*, int, const char*, unsigned int) { return -1; }
+inline int32_t pidfd_open(pid_t, unsigned int) { return -1; }
+inline ssize_t getrandom(void* buf, size_t buflen, unsigned int) { return -1; }
+#else
 inline int32_t getcpu(uint32_t* cpu, uint32_t* node) {
   // Third argument is unused
 #if defined(HAS_SYSCALL_GETCPU) && HAS_SYSCALL_GETCPU
@@ -100,7 +109,8 @@ inline int32_t pidfd_open(pid_t pid, unsigned int flags) {
 inline ssize_t getrandom(void* buf, size_t buflen, unsigned int flags) {
   return ::syscall(SYS_getrandom, buf, buflen, flags);
 }
-#else
+#endif
+#if 0 && defined(_WIN32)
 
 inline int32_t getcpu(uint32_t* cpu, uint32_t* node) {
   if (cpu) {
