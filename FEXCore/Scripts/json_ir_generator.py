@@ -397,7 +397,7 @@ def print_ir_sizes():
     output_file.write("constexpr std::array<size_t, IROps::OP_LAST + 1> IRSizes = {\n")
     for op in IROps:
         if op.Name == "Last":
-            output_file.write("\t-1ULL,\n")
+            output_file.write("\tstatic_cast<size_t>(-1ULL),\n")
         else:
             output_file.write(f"\tsizeof(IROp_{op.Name}),\n")
 
@@ -405,7 +405,7 @@ def print_ir_sizes():
     };
 
     // Make sure our array maps directly to the IROps enum
-    static_assert(IRSizes[IROps::OP_LAST] == -1ULL);
+    static_assert(IRSizes[IROps::OP_LAST] == ~size_t {0});
 
     [[nodiscard]] inline size_t GetSize(IROps Op) { return IRSizes[Op]; }
     [[nodiscard, gnu::const]] std::string_view const& GetName(IROps Op);

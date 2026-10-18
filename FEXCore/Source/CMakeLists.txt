@@ -23,6 +23,7 @@ set(SRCS
   Interface/Core/CodeCache.cpp
   Interface/Core/Core.cpp
   Interface/Core/CPUBackend.cpp
+  Interface/Core/CPUWasmBackend.cpp
   Interface/Core/Addressing.cpp
   Interface/Core/CPUID.cpp
   Interface/Core/Frontend.cpp

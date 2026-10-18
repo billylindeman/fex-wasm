@@ -57,11 +57,11 @@ endif()
 
 # NB: SIZEOF_VOID_P is in bytes, not bits
 # On 32-bit systems this is set to 4
-if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
   message(FATAL_ERROR "Unsupported pointer size ${CMAKE_SIZEOF_VOID_P}."
     " FEX only supports 64-bit (8-byte pointer) systems."
     " If you believe this is in error, file an issue.")
-elseif (NOT (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+elseif (NOT (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "WASI"))
   message(FATAL_ERROR "Unsupported system type ${CMAKE_SYSTEM_NAME}."
     " FEX only supports Linux and Windows."
     " If you believe this is in error, file an issue.")
@@ -111,7 +111,7 @@ elseif (processor MATCHES "^aarch64|^arm64|^armv8\.*")
   endif()
 endif()
 
-if (NOT (ARCHITECTURE_arm64 OR ARCHITECTURE_arm64ec OR ARCHITECTURE_x86_64))
+if (NOT (ARCHITECTURE_arm64 OR ARCHITECTURE_arm64ec OR ARCHITECTURE_x86_64 OR processor MATCHES "wasm"))
   message(FATAL_ERROR "Unsupported processor type ${processor}."
     " If you believe this is in error, file an issue.")
 endif()
