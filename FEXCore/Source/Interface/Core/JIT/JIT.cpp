@@ -1079,7 +1079,7 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
 
   JITCodeTail JITBlockTail {
     .RIP = Entry,
-    .GuestSize = Size,
+    .GuestSize = static_cast<size_t>(Size),
     .SpinLockFutex = 0,
     .SingleInst = SingleInst,
   };

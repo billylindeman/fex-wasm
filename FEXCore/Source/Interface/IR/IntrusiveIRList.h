@@ -155,7 +155,7 @@ public:
 
   [[nodiscard]]
   size_t GetInlineSize() const {
-    static_assert(sizeof(*this) == 32);
+    static_assert(sizeof(*this) == sizeof(void*) * 2 + sizeof(size_t) * 2);
     return sizeof(*this) + DataSize + ListSize;
   }
 

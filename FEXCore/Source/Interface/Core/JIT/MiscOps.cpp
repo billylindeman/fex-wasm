@@ -266,6 +266,8 @@ DEF_OP(ProcessorID) {
 #if defined(ARCHITECTURE_x86_64)
   // Just to ensure the syscall number doesn't change if compiled for an x86_64 host.
   constexpr auto GetCPUSyscallNum = 0xa8;
+#elif defined(__wasm__)
+  constexpr auto GetCPUSyscallNum = 0;
 #else
   constexpr auto GetCPUSyscallNum = SYS_getcpu;
 #endif

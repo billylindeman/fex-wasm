@@ -736,8 +736,8 @@ namespace DiskCache {
             if (DiffCount) {
               uint64_t DiffStart = DiffOffset >= 8 ? DiffOffset - 8 : 0;
               uint64_t DiffContextBytes = std::min<uint64_t>(16, Entry.GuestSize - DiffStart);
-              auto LiveDump = fmt::join(std::span<const uint8_t> {LiveGuest + DiffStart, DiffContextBytes}, " ");
-              auto CacheDump = fmt::join(std::span<const uint8_t> {CachedGuest + DiffStart, DiffContextBytes}, " ");
+              auto LiveDump = fmt::join(std::span<const uint8_t> {LiveGuest + DiffStart, static_cast<size_t>(DiffContextBytes)}, " ");
+              auto CacheDump = fmt::join(std::span<const uint8_t> {CachedGuest + DiffStart, static_cast<size_t>(DiffContextBytes)}, " ");
               auto KeyPrefix = (Region && Region->FileStartVA) ? "file" : "anon";
               LogMan::Msg::IFmt("DiskCache: lookup guest hash mismatch key={}-{:x} gsize={}, ndiff={}, first diff: offset={} "
                                 "live=[{:02x}] "

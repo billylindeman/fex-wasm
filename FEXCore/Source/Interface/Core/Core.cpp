@@ -15,6 +15,7 @@ $end_info$
 #include "Interface/Core/ArchHelpers/Arm64Emitter.h"
 #include "Interface/Core/LookupCache.h"
 #include "Interface/Core/CPUBackend.h"
+#include "Interface/Core/CPUWasmBackend.h"
 #include "Interface/Core/CPUID.h"
 #include "Interface/Core/Frontend.h"
 #include "Interface/Core/OpcodeDispatcher.h"
@@ -411,7 +412,13 @@ void ContextImpl::InitializeCompiler(FEXCore::Core::InternalThreadState* Thread)
   Dispatcher->InitThreadPointers(Thread);
 
   // Create CPU backend
+#ifdef __wasm__
+  // The WASM backend: IR → wasm modules (doc 02 §3). Host code generation
+  // (Arm64 JIT) is meaningless on a wasm host.
+  Thread->CPUBackend = FEXCore::CPU::CreateWasmBackend(this, Thread);
+#else
   Thread->CPUBackend = FEXCore::CPU::CreateArm64JITCore(this, Thread);
+#endif
 
   // We finalize *after* the CPU backend is initialized, as the CPU backend will
   // provide necessary register information to the register allocation pass.
@@ -996,7 +1003,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
       if (DebugData && DebugData->Relocations) {
         Relocations = *DebugData->Relocations;
       }
-      std::span<const uint8_t> GuestCode = {reinterpret_cast<const uint8_t*>(StartAddr), Length};
+      std::span<const uint8_t> GuestCode = {reinterpret_cast<const uint8_t*>(StartAddr), static_cast<size_t>(Length)};
       const Frontend::Decoder::DecodedBlockInformation* BlockInfo =
         NeedsAddGuestCodeRanges ? Thread->FrontendDecoder->GetDecodedBlockInfo() : nullptr;
       DiskCache.Store(Thread, Region, GuestRIP, *DiskCacheGuestCodeKey, GuestCode, CompiledCode, Relocations, BlockInfo);

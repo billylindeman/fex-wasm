@@ -230,7 +230,7 @@ void CodeMapWriter::AppendLibraryLoad(const FEXCore::ExecutableFileInfo& FileInf
   WritePtr = std::copy_n(reinterpret_cast<const char*>(&ExternalFileId), sizeof(ExternalFileId), WritePtr);
   WritePtr = std::copy(FileInfo.Filename.begin(), FileInfo.Filename.end(), WritePtr);
   std::fill(WritePtr, Data + TotalSize, 0);
-  AppendData(std::as_bytes(std::span {Data, TotalSize}));
+  AppendData(std::as_bytes(std::span {Data, static_cast<size_t>(TotalSize)}));
 }
 
 void CodeMapWriter::AppendSetMainExecutable(const FEXCore::ExecutableFileInfo& FileInfo, bool Is64Bit) {
@@ -943,7 +943,7 @@ void CodeCache::FinalizeCodePages(MappedCodeCacheFile& Code, std::span<std::byte
 
   FEXCORE_PROFILE_SCOPED("FinalizeCodePages");
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__wasm__)
   // Atomicity is critical when making the finalized code data visible.
   // We ensure this by remapping a temporary buffer onto the PROT_NONE
   // placeholder page in CodeBuffer. Some constraints to keep in mind are:
@@ -988,6 +988,11 @@ void CodeCache::FinalizeCodePages(MappedCodeCacheFile& Code, std::span<std::byte
   Allocator::VirtualDontNeed(Code.CodeBufferInFile.data() + StartOffset, Size);
 #else
   // TODO: Implement lazy mapping on Windows
+  // WASI: no mremap; copy the finalized pages like the Windows path. Cold on
+  // the embedded build: only reachable with the disk cache enabled.
+#ifdef __wasm__
+  memcpy(Code.CodeBuffer.data() + StartOffset, Code.CodeBufferInFile.data() + StartOffset, Size);
+#endif
 #ifdef _M_ARM64EC
   memcpy(Code.CodeBuffer.data() + StartOffset, Code.CodeBufferInFile.data() + StartOffset, Size);
 #endif
