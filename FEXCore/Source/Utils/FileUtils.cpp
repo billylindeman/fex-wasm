@@ -46,6 +46,32 @@ static bool RecursiveRemoveDirectory(int parent_fd, const char* Directory) {
 
   // Walk the directory listing.
   bool Result = true;
+#if defined(__wasm__)
+  // WASI: no raw getdents64 protocol; walk via fdopendir/readdir.
+  DIR* DirStream = fdopendir(dir_fd);
+  if (!DirStream) {
+    return false;
+  }
+  while (auto* Entry = readdir(DirStream)) {
+    if (Entry->d_name == std::string_view(".") || Entry->d_name == std::string_view("..")) {
+      continue;
+    }
+    if (Entry->d_type == DT_DIR) {
+      if (!RecursiveRemoveDirectory(dir_fd, Entry->d_name)) {
+        Result = false;
+        break;
+      }
+    }
+    if (!unlinkat(dir_fd, Entry->d_name, Entry->d_type == DT_DIR)) {
+      // Couldn't unlink the file for some reason.
+      LogMan::Msg::IFmt("Failed to remove file: {}", Entry->d_name);
+      Result = false;
+      break;
+    }
+  }
+  closedir(DirStream);
+  return Result;
+#else
   // Four pages arbitrary chosen to be a balance between NFS wanting to return data in page-size granules and
   // local filesystems returning arbitrary sizes.
   size_t dirent_size = 4096 * 4;
@@ -123,6 +149,7 @@ end:
 
   close(dir_fd);
   return Result;
+#endif
 }
 
 FEX_DEFAULT_VISIBILITY bool RecursiveRemoveDirectory(const fextl::string& Directory) {
@@ -140,6 +167,23 @@ FEX_DEFAULT_VISIBILITY void WalkDirectory(std::string_view Directory,
       return;
     }
   }
+  // Four pages arbitrary chosen to be a balance between NFS wanting to return data in page-size granules and
+  // local filesystems returning arbitrary sizes.
+#if defined(__wasm__)
+  // WASI: no raw getdents64 protocol; walk via fdopendir/readdir.
+  DIR* DirStream = fdopendir(dir_fd);
+  if (!DirStream) {
+    return;
+  }
+  while (auto* Entry = readdir(DirStream)) {
+    if (Entry->d_name == std::string_view(".") || Entry->d_name == std::string_view("..")) {
+      continue;
+    }
+    Callback(Entry->d_name, Entry->d_type == DT_DIR, user_data);
+  }
+  closedir(DirStream);
+  close(dir_fd);
+#else
   // Four pages arbitrary chosen to be a balance between NFS wanting to return data in page-size granules and
   // local filesystems returning arbitrary sizes.
   size_t dirent_size = 4096 * 4;
@@ -199,6 +243,7 @@ end:
   }
 
   close(dir_fd);
+#endif
 }
 
 #else

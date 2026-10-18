@@ -120,7 +120,12 @@ static constexpr uint32_t GetRmReg(uint32_t Instr) {
 }
 
 static void ClearICache(void* Begin, std::size_t Length) {
+#if defined(__wasm__)
+  // No native code is generated on wasm; nothing to flush.
+  (void)Begin; (void)Length;
+#else
   __builtin___clear_cache(static_cast<char*>(Begin), static_cast<char*>(Begin) + Length);
+#endif
 }
 
 static __uint128_t LoadAcquire128(uint64_t Addr) {

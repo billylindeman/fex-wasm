@@ -2,9 +2,15 @@
 #include <FEXCore/Utils/LongJump.h>
 #include <FEXCore/Utils/LogManager.h>
 
+#include <cstdint>
 #include <cstring>
 
 namespace FEXCore::UncheckedLongJump {
+#if defined(__wasm__)
+// WASM: host-side unwind/longjmp is redesigned with the wasm platform shim.
+uint64_t SetJump(JumpBuf&) { return 0; }
+void LongJump(const JumpBuf&, uint64_t) {}
+#else
 #if defined(ARCHITECTURE_arm64)
 #ifdef __arm64ec__
 #pragma clang diagnostic ignored "-Winline-asm"
@@ -85,66 +91,7 @@ FEX_DEFAULT_VISIBILITY void ManuallyLoadJumpBuf(const JumpBuf& Buffer, uint64_t 
   *PC = GPRs[30];
 }
 
-#else
-[[nodiscard]]
-FEX_DEFAULT_VISIBILITY FEX_NAKED uint64_t SetJump(JumpBuf& Buffer) {
-  __asm volatile(R"(
-    .intel_syntax noprefix;
-    // rdi contains the jumpbuffer
-    mov [rdi + (0 * 8)], rbx;
-    mov [rdi + (1 * 8)], rsp;
-    mov [rdi + (2 * 8)], rbp;
-    mov [rdi + (3 * 8)], r12;
-    mov [rdi + (4 * 8)], r13;
-    mov [rdi + (5 * 8)], r14;
-    mov [rdi + (6 * 8)], r15;
-
-    // Return address is on the stack, load it and store
-    mov rsi, [rsp];
-    mov [rdi + (7 * 8)], rsi;
-
-    // Return zero to signify this is the SetJump.
-    mov rax, 0;
-    ret;
-
-    .att_syntax prefix;
-    )" ::
-                   : "memory");
-}
-
-[[noreturn]]
-FEX_DEFAULT_VISIBILITY FEX_NAKED void LongJump(const JumpBuf& Buffer, uint64_t Value) {
-  __asm volatile(R"(
-    .intel_syntax noprefix;
-    // rdi contains the jumpbuffer
-    mov rbx, [rdi + (0 * 8)];
-    mov rsp, [rdi + (1 * 8)];
-    mov rbp, [rdi + (2 * 8)];
-    mov r12, [rdi + (3 * 8)];
-    mov r13, [rdi + (4 * 8)];
-    mov r14, [rdi + (5 * 8)];
-    mov r15, [rdi + (6 * 8)];
-
-    // Move value in to result register
-    mov rax, rsi;
-
-    // Pop the dead return address off the stack
-    pop rsi;
-
-    // Load the original return address from the jumpbuffer
-    mov rsi, [rdi + (7 * 8)];
-
-    // Return using a jump
-    jmp rsi;
-
-    .att_syntax prefix;
-    )" ::
-                   : "memory");
-}
-
-FEX_DEFAULT_VISIBILITY void ManuallyLoadJumpBuf(JumpBuf& Buffer, uint64_t Value, uint64_t* GPRs, __uint128_t* FPRs, uint64_t* PC) {
-  LOGMAN_MSG_A_FMT("This is unimplemented on x86-64");
-}
-
 #endif
+#endif
+
 } // namespace FEXCore::UncheckedLongJump

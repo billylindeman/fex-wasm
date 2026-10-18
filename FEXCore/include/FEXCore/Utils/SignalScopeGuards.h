@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#if defined(__wasm__)
+#define FEXCORE_WASM_NO_SIGPROCMASK 1
+#endif
 #include <FEXCore/Debug/InternalThreadState.h>
 
 #include <atomic>
@@ -158,7 +161,9 @@ public:
   explicit ScopedSignalMasker(uint64_t Mask)
     : OriginalMask(0) {
     // Mask all signals, storing the original incoming mask
+    #if !defined(FEXCORE_WASM_NO_SIGPROCMASK)
     ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &Mask, &*OriginalMask, sizeof(*OriginalMask));
+    #endif
   }
 
   // Move-only type
@@ -171,7 +176,9 @@ public:
 
   ~ScopedSignalMasker() {
     if (OriginalMask) {
+      #if !defined(FEXCORE_WASM_NO_SIGPROCMASK)
       ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &OriginalMask, nullptr, sizeof(*OriginalMask));
+      #endif
     }
   }
 private:

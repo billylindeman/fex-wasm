@@ -4,7 +4,20 @@
 #include <cstdint>
 #include <limits.h>
 
-#if !defined(_WIN32)
+#if defined(__wasm__)
+#include <stdlib.h>
+#define SYS_futex 0
+static inline long syscall(long, ...) { return -1; }
+#include <stdatomic.h>
+#define FUTEX_PRIVATE_FLAG 128
+#define FUTEX_WAIT_BITSET 9
+#define FUTEX_WAKE_BITSET 10
+#define FUTEX_CLOCK_REALTIME 256
+#define FUTEX_WAIT_PRIVATE 0
+#define FUTEX_WAKE_PRIVATE 1
+#define FUTEX_WAIT 0
+#define FUTEX_WAKE 1
+#elif !defined(_WIN32)
 #include <linux/futex.h> /* Definition of FUTEX_* constants */
 #include <sys/syscall.h> /* Definition of SYS_* constants */
 #include <unistd.h>

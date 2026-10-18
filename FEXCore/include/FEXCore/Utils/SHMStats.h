@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
+#if defined(__wasm__)
+static inline unsigned __rdtscp(unsigned* p) { if (p) *p = 0; return 0; }
+#define _X86INTRIN_H_
+#endif
 #include <atomic>
 #include <cstddef>
 #include <cstdint>

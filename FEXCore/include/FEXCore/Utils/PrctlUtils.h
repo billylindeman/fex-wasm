@@ -3,7 +3,13 @@
 
 #ifndef _WIN32
 
+#if defined(__wasm__)
+#define PR_GET_NAME 16
+#define PR_SET_NAME 15
+static inline int prctl(int, ...) { return 0; }
+#else
 #include <sys/prctl.h>
+#endif
 
 #ifndef PR_SET_VMA
 #define PR_SET_VMA 0x53564d41

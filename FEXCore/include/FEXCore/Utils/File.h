@@ -217,9 +217,14 @@ public:
       return false; // we could return true here :thonk:
     }
 #ifndef _WIN32
+#if defined(__wasm__)
+    // WASI: no flock; single-process embed, advisory locking is a no-op.
+    (void)Handle;
+#else
     if (flock(Handle, LOCK_UN) == -1) {
       return false;
     }
+#endif
 #else
     OVERLAPPED Overlapped {};
     Overlapped.Offset = static_cast<DWORD>(LOCK_SENTINEL_OFFSET);
@@ -344,9 +349,14 @@ private:
       return true;
     }
 #ifndef _WIN32
+#if defined(__wasm__)
+    // WASI: no flock; single-process embed, advisory locking is a no-op.
+    (void)Handle;
+#else
     if (flock(Handle, LOCK_EX | LOCK_NB) == -1) {
       return false;
     }
+#endif
 #else
     // mimic posix advisory-only lock by locking some unattainably-high bit
     OVERLAPPED Overlapped {};

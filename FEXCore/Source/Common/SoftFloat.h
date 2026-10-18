@@ -30,7 +30,7 @@ struct FEX_PACKED X80SoftFloat {
 #define BIGFLOAT float128_t
 #define BIGFLOATSIZE 16
 #endif
-#elif defined(ARCHITECTURE_arm64)
+#elif defined(ARCHITECTURE_arm64) || defined(__wasm__)
 #define BIGFLOAT float128_t
 #define BIGFLOATSIZE 16
 #else

@@ -2,9 +2,16 @@
 #include <cstdint>
 #include <fcntl.h>
 #ifndef _WIN32
+#if defined(__wasm__)
+#define PROC_SUPER_MAGIC 0x9fa0
+#define TMPFS_MAGIC 0x01021994
+#else
 #include <linux/magic.h>
+#endif
 #include <sys/stat.h>
+#if !defined(__wasm__)
 #include <sys/vfs.h>
+#endif
 #endif
 
 #include <FEXCore/Utils/LogManager.h>

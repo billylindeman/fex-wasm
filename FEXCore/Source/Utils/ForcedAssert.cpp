@@ -3,6 +3,14 @@
 
 namespace FEXCore::Assert {
 // This function can not be inlined
+#if defined(__wasm__)
+// WASI: no naked functions or native trap instructions; __builtin_trap maps to
+// the wasm `unreachable` opcode.
+[[noreturn]]
+__attribute__((noinline)) void ForcedAssert() {
+  __builtin_trap();
+}
+#else
 [[noreturn]]
 __attribute__((noinline, naked)) void ForcedAssert() {
 #ifdef ARCHITECTURE_x86_64
@@ -11,4 +19,5 @@ __attribute__((noinline, naked)) void ForcedAssert() {
   asm volatile("hlt #1");
 #endif
 }
+#endif
 } // namespace FEXCore::Assert

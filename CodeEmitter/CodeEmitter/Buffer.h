@@ -63,7 +63,11 @@ public:
   }
 
   static void ClearICache(void* Begin, std::size_t Length) {
+#if defined(__wasm__)
+    // No native code generated on wasm; nothing to flush.
+#else
     __builtin___clear_cache(static_cast<char*>(Begin), static_cast<char*>(Begin) + Length);
+#endif
   }
 
   size_t GetCursorOffset() const {

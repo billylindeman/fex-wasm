@@ -29,6 +29,16 @@ static inline VectorRegPairType MakeVectorRegPair(VectorRegType low, VectorRegTy
   return VectorRegPairType {low, high};
 }
 
+#elif defined(__wasm__)
+using VectorRegType = __attribute__((vector_size(16))) uint8_t;
+struct VectorRegPairType {
+  VectorRegType val[2];
+};
+
+static inline VectorRegPairType MakeVectorRegPair(VectorRegType low, VectorRegType high) {
+  return VectorRegPairType {low, high};
+}
+
 #elif defined(ARCHITECTURE_x86_64)
 using VectorRegType = __m128i;
 using VectorRegPairType = __m256i;
