@@ -109,6 +109,11 @@ void PushI32Load(fextl::vector<uint8_t>& Out, uint32_t Offset) {
   PushULEB(Out, Offset);
 }
 
+void PushI64Load(fextl::vector<uint8_t>& Out, uint32_t Offset) {
+  PushVec(Out, {0x29, 3}); // i64.load, align 8
+  PushULEB(Out, Offset);
+}
+
 void PushI32Load8U(fextl::vector<uint8_t>& Out, uint32_t Offset) {
   PushVec(Out, {0x2D, 0}); // i32.load8_u, align 1
   PushULEB(Out, Offset);
@@ -234,6 +239,7 @@ bool PushGPRLoad(fextl::vector<uint8_t>& Out, uint32_t AccessSize, uint32_t Offs
   case 1: PushI32Load8U(Out, Offset); return true;
   case 2: PushI32Load16U(Out, Offset); return true;
   case 4: PushI32Load(Out, Offset); return true;
+  case 8: PushI64Load(Out, Offset); return true;
   default: return false;
   }
 }
@@ -550,13 +556,23 @@ private:
   // Anything else fails loudly (the honest-failure contract).
   bool EmitEffectiveAddress(const IR::IRListView* IR, IR::OrderedNodeWrapper Addr, IR::OrderedNodeWrapper Offset,
                             IR::MemOffsetType OffsetType, uint8_t OffsetScale, FunctionEmitter& FE, uint32_t* MemArgOffset) {
+    // The 32-bit guest model's address width: an I64-typed base (the 8-byte
+    // GDT-entry read the segment chain feeds forward) wraps to i32 — the
+    // guest's address space is the low 32 bits (guest VA == wasm offset,
+    // doc 01 §5).
+    auto PushAddrLocal = [&](uint32_t Local) {
+      PushLocalGet(FE.Body, Local);
+      if (FE.LocalIsI64(Local)) {
+        FE.Body.push_back(0xA7); // i32.wrap_i64
+      }
+    };
     uint32_t Base;
     if (!ResolveArg(IR, Addr, FE, &Base)) {
       return false;
     }
     if (Offset.IsInvalid()) {
       *MemArgOffset = 0;
-      PushLocalGet(FE.Body, Base);
+      PushAddrLocal(Base);
       return true;
     }
     if (!Offset.IsImmediate()) {
@@ -565,19 +581,25 @@ private:
         const uint64_t Const = NH->C<IR::IROp_InlineConstant>()->Constant;
         if (OffsetType == IR::MemOffsetType::SXTX && OffsetScale == 1 && Const <= 0x7FFFFFFFull) {
           *MemArgOffset = static_cast<uint32_t>(Const);
-          PushLocalGet(FE.Body, Base);
+          PushAddrLocal(Base);
           return true;
         }
-        PushLocalGet(FE.Body, Base);
+        PushAddrLocal(Base);
         PushU32Const(FE.Body, static_cast<uint32_t>(Const));
         FE.Body.push_back(0x6A); // i32.add
         *MemArgOffset = 0;
         return true;
       }
     }
-    if (OffsetType != IR::MemOffsetType::SXTX) {
-      LogMan::Msg::EFmt("WasmBackend: unsupported mem offset type {}", static_cast<uint32_t>(OffsetType));
-      return false;
+    if (OffsetType != IR::MemOffsetType::SXTX && OffsetType != IR::MemOffsetType::UXTW) {
+      // UXTW is the segment chain's offset type (UpdatePrefixFromSegment's
+      // selector & 0xfff8). In the 32-bit model a 32-bit offset node emits
+      // identically under either extension (the wasm i32 add wraps), so it
+      // shares the SXTX lowering. Scale > 1 has no 32-bit guest emitter yet.
+      if (OffsetType != IR::MemOffsetType::UXTW || OffsetScale != 1) {
+        LogMan::Msg::EFmt("WasmBackend: unsupported mem offset type {}", static_cast<uint32_t>(OffsetType));
+        return false;
+      }
     }
     uint32_t Off;
     if (!ResolveArg(IR, Offset, FE, &Off)) {
@@ -593,7 +615,7 @@ private:
         return false;
       }
     }
-    PushLocalGet(FE.Body, Base);
+    PushAddrLocal(Base);
     PushLocalGet(FE.Body, Off);
     if (Shift != 0) {
       PushU32Const(FE.Body, Shift);
@@ -620,6 +642,12 @@ private:
     if (!PushGPRLoad(FE.Body, Size, MemArgOffset)) {
       LogMan::Msg::EFmt("WasmBackend: LoadMem with unsupported size {}", Size);
       return false;
+    }
+    if (Size == 8 && !FE.LocalIsI64(DestLocal)) {
+      // The 8-byte GPR read (the segment chain's 8-byte GDT-entry load) lands
+      // in the 32-bit model's default I32 dest unless a consumer typed it I64
+      // (fild m64's shape): wrap to the guest's address width.
+      FE.Body.push_back(0xA7); // i32.wrap_i64
     }
     PushLocalSet(FE.Body, DestLocal);
     return true;
@@ -1284,6 +1312,40 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       PushLocalSet(FE.Body, Dest);
       break;
     }
+    case IR::IROps::OP_ORLSHR: {
+      // Src1 | (Src2 >> BitShift) — the segment-base merge idiom
+      // (UpdatePrefixFromSegment's high-word extraction). The 32-bit model:
+      // an I64-typed source (the 8-byte GDT-entry read) wraps to i32 before
+      // the shift/or — the op's i32 OpSize is the guest's address width,
+      // and the meaningful bits of the merge live in the low 32.
+      // The i64Bit form is the packed-RFLAG flag assembly's shape
+      // (GetPackedRFLAG's SF/ZF OR-in) — named loud-fail: the flag
+      // materialization around it (the deferred AF/PF read idiom) has its
+      // own never-exercised gaps, so the LAHF/PUSHF family stays a named
+      // skip (the corpus's 'orlshr' family) until that lands as a unit.
+      const auto* Op = IROp->C<IR::IROp_Orlshr>();
+      if (IROp->Size != IR::OpSize::i32Bit) {
+        LogMan::Msg::EFmt("WasmBackend: Orlshr with unsupported size {} (the i64 flag-assembly form is a named gap)", IR::OpSizeAsBits(IROp->Size));
+        return false;
+      }
+      uint32_t S1, S2;
+      if (!ResolveArg(IR, Op->Src1, FE, &S1) || !ResolveArg(IR, Op->Src2, FE, &S2)) {
+        return false;
+      }
+      PushLocalGet(FE.Body, S1);
+      if (FE.LocalIsI64(S1)) {
+        FE.Body.push_back(0xA7); // i32.wrap_i64
+      }
+      PushLocalGet(FE.Body, S2);
+      if (FE.LocalIsI64(S2)) {
+        FE.Body.push_back(0xA7); // i32.wrap_i64
+      }
+      PushU32Const(FE.Body, Op->BitShift);
+      FE.Body.push_back(0x76); // i32.shr_u
+      FE.Body.push_back(0x72); // i32.or
+      PushLocalSet(FE.Body, Dest);
+      break;
+    }
     case IR::IROps::OP_XOR: {
       uint32_t A, B;
       if (!ResolveArg(IR, IROp->Args[0], FE, &A) || !ResolveArg(IR, IROp->Args[1], FE, &B)) {
@@ -1917,17 +1979,28 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
     case IR::IROps::OP_ROR: {
       // Variable shifts/rotates. Wasm's i32 shifts/rotate mask the count to
       // 5 bits natively, matching x86's count masking for 32-bit ops.
+      // The i64 source shape (the segment chain's 8-byte GDT-entry read
+      // feeding `_Lshr(i64, ..., 32)`): the value stays i64 through the
+      // shift and the default I32 dest wraps (the guest's address width);
+      // the count widens to i64 for the op's type to check.
       uint32_t A, B;
       if (!ResolveArg(IR, IROp->Args[0], FE, &A) || !ResolveArg(IR, IROp->Args[1], FE, &B)) {
         return false;
       }
+      const bool SrcI64 = FE.LocalIsI64(A);
       PushLocalGet(FE.Body, A);
       PushLocalGet(FE.Body, B);
+      if (SrcI64) {
+        FE.Body.push_back(0xAD); // i64.extend_i32_u (the count operand's type)
+      }
       switch (IROp->Op) {
-      case IR::IROps::OP_LSHL: FE.Body.push_back(0x74); break; // i32.shl
-      case IR::IROps::OP_LSHR: FE.Body.push_back(0x76); break; // i32.shr_u
-      case IR::IROps::OP_ASHR: FE.Body.push_back(0x75); break; // i32.shr_s
-      default: FE.Body.push_back(0x78); break; // i32.rotr
+      case IR::IROps::OP_LSHL: FE.Body.push_back(SrcI64 ? 0x86 : 0x74); break; // shl
+      case IR::IROps::OP_LSHR: FE.Body.push_back(SrcI64 ? 0x88 : 0x76); break; // shr_u
+      case IR::IROps::OP_ASHR: FE.Body.push_back(SrcI64 ? 0x87 : 0x75); break; // shr_s
+      default: FE.Body.push_back(SrcI64 ? 0x8B : 0x78); break; // rotr
+      }
+      if (SrcI64 && !FE.LocalIsI64(Dest)) {
+        FE.Body.push_back(0xA7); // i32.wrap_i64
       }
       PushLocalSet(FE.Body, Dest);
       break;
@@ -2673,7 +2746,7 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       PushLocalGet(FE.Body, S1);
       PushLocalGet(FE.Body, S2);
       PushU32Const(FE.Body, Op->BitShift & 31);
-      FE.Body.push_back(0x8A); // i32.rotr
+      FE.Body.push_back(0x78); // i32.rotr
       PushU32Const(FE.Body, 0xFFFFFFFF);
       FE.Body.push_back(0x73); // i32.xor -> the inverted operand
       FE.Body.push_back(0x72); // i32.or
@@ -2933,6 +3006,49 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
         LogMan::Msg::EFmt("WasmBackend: StoreContext with unsupported size {}", Size);
         return false;
       }
+      break;
+    }
+    case IR::IROps::OP_LOADCONTEXTINDEXED: {
+      // N6: the segment-register write chain's indexed context read
+      // (UpdatePrefixFromSegment: segment_arrays[Index] — the GDT/LDT array
+      // pointer, indexed by the selector's TI bit). The address is dynamic
+      // (AbsBase + Index * Stride), so the address operand carries the sum
+      // and the mem-arg offset stays 0. The 64-bit context pointer
+      // truncates to the 32-bit linear-memory offset (guest VA == wasm
+      // offset, doc 01 §5); the private GDT lives inside the CPUState in
+      // linear memory, so the truncation is exact.
+      const auto* Op = IROp->C<IR::IROp_LoadContextIndexed>();
+      if (Op->Class != IR::RegClass::GPR) {
+        LogMan::Msg::EFmt("WasmBackend: LoadContextIndexed with unsupported register class {}", static_cast<uint32_t>(Op->Class));
+        return false;
+      }
+      uint32_t Index;
+      if (!ResolveArg(IR, Op->Index, FE, &Index)) {
+        return false;
+      }
+      const uint32_t Size = IR::OpSizeToSize(IROp->Size);
+      const uint32_t AbsBase = ContextBase + offsetof(FEXCore::Core::CpuStateFrame, State) + Op->BaseOffset;
+      PushU32Const(FE.Body, AbsBase);
+      PushLocalGet(FE.Body, Index);
+      PushU32Const(FE.Body, Op->Stride);
+      FE.Body.push_back(0x6C); // i32.mul
+      FE.Body.push_back(0x6A); // i32.add
+      if (Size == 8) {
+        PushI64Load(FE.Body, 0);
+        if (!FE.LocalIsI64(Dest)) {
+          FE.Body.push_back(0xA7); // i32.wrap_i64 (the 32-bit model's address width)
+        }
+      } else if (Size == 4) {
+        PushI32Load(FE.Body, 0);
+      } else if (Size == 2) {
+        PushI32Load16U(FE.Body, 0);
+      } else if (Size == 1) {
+        PushI32Load8U(FE.Body, 0);
+      } else {
+        LogMan::Msg::EFmt("WasmBackend: LoadContextIndexed with unsupported size {}", Size);
+        return false;
+      }
+      PushLocalSet(FE.Body, Dest);
       break;
     }
     case IR::IROps::OP_F80ADDSTACK:
