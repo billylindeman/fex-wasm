@@ -2225,6 +2225,10 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       const auto* Op = IROp->C<IR::IROp_LoadNamedVectorConstant>();
       uint64_t Lo = 0, Hi = 0;
       switch (Op->Constant) {
+      case IR::NamedVectorConstant::NAMED_VECTOR_ZERO:
+        // The pxor-zero idiom's constant (LoadZeroVector): all-zero lanes.
+        Lo = Hi = 0;
+        break;
       case IR::NamedVectorConstant::NAMED_VECTOR_CVTMAX_F32_I32:
       case IR::NamedVectorConstant::NAMED_VECTOR_CVTMAX_F32_I32_UPPER:
         Lo = Hi = 0x4F0000004F000000ULL; // 2147483648.0f splatted
@@ -3537,7 +3541,7 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       }
       UsesFPR = true;
       const uint32_t ElemBits = IR::OpSizeAsBits(IROp->ElementSize);
-      const uint32_t RegBits = IR::OpSizeAsBits(IROp->DestSize);
+      const uint32_t RegBits = IR::OpSizeAsBits(IROp->Size);
       const uint32_t Pairs = (RegBits / ElemBits) / 2;
       uint8_t ExtractOp, ReplaceOp;
       switch (ElemBits) {
