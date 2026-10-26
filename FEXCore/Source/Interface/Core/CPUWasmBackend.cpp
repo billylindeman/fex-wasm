@@ -3524,6 +3524,46 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       PushLocalSet(FE.Body, Dest);
       break;
     }
+    case IR::IROps::OP_VZIP: {
+      // DestVector = the low-half interleave (the punpckl* family): the
+      // dest's even lanes keep VectorLower's, the odd lanes take
+      // VectorUpper's. The wasm lane extract/replace pair covers every
+      // element size the frontend emits (the P2.12 tier's movd/movq ride
+      // the same primitives); the trailing half-lanes keep the dest's.
+      const auto* Op = IROp->C<IR::IROp_VZip>();
+      uint32_t D, S;
+      if (!ResolveArg(IR, Op->VectorLower, FE, &D) || !ResolveArg(IR, Op->VectorUpper, FE, &S)) {
+        return false;
+      }
+      UsesFPR = true;
+      const uint32_t ElemBits = IR::OpSizeAsBits(IROp->ElementSize);
+      const uint32_t RegBits = IR::OpSizeAsBits(IROp->DestSize);
+      const uint32_t Pairs = (RegBits / ElemBits) / 2;
+      uint8_t ExtractOp, ReplaceOp;
+      switch (ElemBits) {
+        case 8:  ExtractOp = 0x16; ReplaceOp = 0x17; break; // i8x16.extract_lane_u / replace_lane
+        case 16: ExtractOp = 0x19; ReplaceOp = 0x1A; break; // i16x8.extract_lane_u / replace_lane
+        case 32: ExtractOp = 0x1B; ReplaceOp = 0x1C; break; // i32x4.extract_lane / replace_lane
+        case 64: ExtractOp = 0x1D; ReplaceOp = 0x1E; break; // i64x2.extract_lane / replace_lane
+        default:
+          LogMan::Msg::EFmt("WasmBackend: VZip with unsupported element size {}", ElemBits);
+          return false;
+      }
+      if (Pairs == 0 || Pairs > 8) {
+        LogMan::Msg::EFmt("WasmBackend: VZip with unsupported lane count {}", Pairs * 2);
+        return false;
+      }
+      for (uint32_t k = 0; k < Pairs; ++k) {
+        PushLocalGet(FE.Body, D);
+        PushLocalGet(FE.Body, S);
+        PushVec(FE.Body, {0xFD, ExtractOp});
+        PushULEB(FE.Body, k);
+        PushVec(FE.Body, {0xFD, ReplaceOp});
+        PushULEB(FE.Body, 2 * k + 1);
+      }
+      PushLocalSet(FE.Body, Dest);
+      break;
+    }
     case IR::IROps::OP_FCMP: {
       // Arm-FCMP-shaped NZCV from a scalar compare (the UCOMIS path; the
       // x86 form comes from the following AXFlag).
