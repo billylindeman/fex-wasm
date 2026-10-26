@@ -2005,6 +2005,47 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       PushLocalSet(FE.Body, Dest);
       break;
     }
+    case IR::IROps::OP_EXTR: {
+      // The double-precision shift (shld/shrd immediate pair): ConcatValue =
+      // $Upper:$Lower, Result = ConcatValue[LSB+Size-1 : LSB] (IR.json's
+      // contract; the Arm64 JIT's `extr`). EXTR itself writes no flags — the
+      // dispatcher's deferred-flag ops (CalculateFlags_ShiftRightDouble*
+      // family) ride their own already-served lowerings, so there is no CF
+      // story here to fake. The count masking is the dispatcher's
+      // GetConstantShift (& 0x1F for 32-bit) — the LSB arriving here is
+      // pre-masked and the i386 guest's shape is always the 32-bit one:
+      // concat the two 32-bit halves into an i64 (the P2.12 movq primitive's
+      // extend/wrap pair), shift right by the immediate, wrap to i32.
+      const auto* Op = IROp->C<IR::IROp_Extr>();
+      uint32_t Upper, Lower;
+      if (!ResolveArg(IR, Op->Upper, FE, &Upper) || !ResolveArg(IR, Op->Lower, FE, &Lower)) {
+        return false;
+      }
+      const uint32_t SizeBits = IR::OpSizeAsBits(IROp->Size);
+      if (SizeBits != 32) {
+        // Named loud-fail (the i64Bit-Orlshr precedent): the i386 guest
+        // never emits a 64-bit EXTR (the 32-bit shld/shrd immediates lower
+        // to _Extr(i32); the 64-bit ones only exist in a 64-bit guest).
+        LogMan::Msg::EFmt("WasmBackend: EXTR with unsupported size {}", SizeBits);
+        return false;
+      }
+      if (FE.LocalIsI64(Lower) || FE.LocalIsI64(Upper)) {
+        LogMan::Msg::EFmt("WasmBackend: EXTR with I64-typed operands unsupported");
+        return false;
+      }
+      PushLocalGet(FE.Body, Lower);
+      FE.Body.push_back(0xAD); // i64.extend_i32_u
+      PushLocalGet(FE.Body, Upper);
+      FE.Body.push_back(0xAD); // i64.extend_i32_u
+      PushU64Const(FE.Body, 32);
+      FE.Body.push_back(0x86); // i64.shl
+      FE.Body.push_back(0x84); // i64.or
+      PushU64Const(FE.Body, Op->LSB);
+      FE.Body.push_back(0x88); // i64.shr_u
+      FE.Body.push_back(0xA7); // i32.wrap_i64
+      PushLocalSet(FE.Body, Dest);
+      break;
+    }
     case IR::IROps::OP_XORSHIFT: {
       // Src1 ^ shift(Src2) — the Arm64 `eor` with a shifted operand; all four
       // shift shapes are meaningful here.
