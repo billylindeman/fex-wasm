@@ -3680,8 +3680,17 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
         LogMan::Msg::EFmt("WasmBackend: VZip with unsupported lane count {}", Pairs * 2);
         return false;
       }
+      // The accumulate runs on the operand stack: VectorLower is pushed
+      // ONCE, then each pair replaces its odd lane in place
+      // (replace_lane pops the current accumulate). The trailing set
+      // stores the complete interleave — W1's defect was re-reading the
+      // unmodified VectorLower per pair, which dangled the intermediates
+      // and left Dest stale (the d3d9-clear punpckldq movq store landed
+      // {632, 0}). zip1's result depends only on the two source vectors,
+      // never on Dest's prior value (Dest may be fresh — the shuffle
+      // builders' _VZip(Src, Src) shapes).
+      PushLocalGet(FE.Body, D);
       for (uint32_t k = 0; k < Pairs; ++k) {
-        PushLocalGet(FE.Body, D);
         PushLocalGet(FE.Body, S);
         PushVec(FE.Body, {0xFD, ExtractOp});
         PushULEB(FE.Body, k);
