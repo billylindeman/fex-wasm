@@ -1195,10 +1195,18 @@ private:
       FE.Body.push_back(0x71); // i32.and
     }
     PushLocalSet(FE.Body, Dest);
-    // N = sign bit of the masked value, Z = value == 0, C = V = 0.
+    // N = sign bit of the masked value, moved to the NZCV's N position (bit
+    // 31): for sub-32-bit tests (test bl,bl) the masked sign bit sits at
+    // (Bits-1) — the 8-bit `test bl,bl; js` shape read a clear N and the
+    // signed branch never took (the EH type_info decode's indirect deref —
+    // the F3e wall). Z = value == 0, C = V = 0.
     PushLocalGet(FE.Body, Dest);
     PushU32Const(FE.Body, 1u << (Bits - 1));
     FE.Body.push_back(0x71); // i32.and
+    if (Bits != 32) {
+      PushU32Const(FE.Body, 32 - Bits);
+      FE.Body.push_back(0x74); // i32.shl
+    }
     PushLocalGet(FE.Body, Dest);
     FE.Body.push_back(0x45); // i32.eqz
     PushU32Const(FE.Body, 30);
