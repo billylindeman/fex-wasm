@@ -524,6 +524,28 @@ private:
     return true;
   }
 
+  // The Direction arg of MemSet/MemCpy may be an inline constant (the
+  // frontend folds a statically-known DF — e.g. the STD-preloaded backward
+  // rep movs). An inline-constant node has no emitted def, so plain
+  // ResolveArg maps it to a never-written local (reads 0 → the loop's
+  // direction check always takes the forward branch — the F3d
+  // str-rep-movsb-bwd finding). Materialize the constant into a scratch
+  // local instead; the caller's scratch budget covers it.
+  bool ResolveDirection(const IR::IRListView* IR, IR::OrderedNodeWrapper Arg, FunctionEmitter& FE, uint32_t* LocalOut) {
+    if (!Arg.IsImmediate()) {
+      const auto OpHeader = IR->GetOp<IR::IROp_Header>(Arg);
+      if (OpHeader->Op == IR::IROps::OP_INLINECONSTANT) {
+        const auto Value = static_cast<int32_t>(OpHeader->C<IR::IROp_InlineConstant>()->Constant);
+        PushU32Const(FE.Body, Value);
+        const uint32_t Scratch = FE.AllocScratch();
+        PushLocalSet(FE.Body, Scratch);
+        *LocalOut = Scratch;
+        return true;
+      }
+    }
+    return ResolveArg(IR, Arg, FE, LocalOut);
+  }
+
   void RecordDef(FunctionEmitter& FE, const IR::IRListView* IR, IR::OrderedNode* Node, uint32_t NodeID) {
     IR::PhysicalRegister PhyReg(Node);
     if (PhyReg.IsInvalid()) {
@@ -2806,7 +2828,7 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       const auto* Op = IROp->C<IR::IROp_MemCpy>();
       uint32_t Dest, Src, Length, Dir;
       if (!ResolveArg(IR, Op->Dest, FE, &Dest) || !ResolveArg(IR, Op->Src, FE, &Src) ||
-          !ResolveArg(IR, Op->Length, FE, &Length) || !ResolveArg(IR, Op->Direction, FE, &Dir)) {
+          !ResolveArg(IR, Op->Length, FE, &Length) || !ResolveDirection(IR, Op->Direction, FE, &Dir)) {
         return false;
       }
       const uint32_t ElemBytes = IR::OpSizeToSize(Op->Size);
@@ -2923,7 +2945,7 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       const auto* Op = IROp->C<IR::IROp_MemSet>();
       uint32_t Addr, Value, Length, Dir;
       if (!ResolveArg(IR, Op->Addr, FE, &Addr) || !ResolveArg(IR, Op->Value, FE, &Value) ||
-          !ResolveArg(IR, Op->Length, FE, &Length) || !ResolveArg(IR, Op->Direction, FE, &Dir)) {
+          !ResolveArg(IR, Op->Length, FE, &Length) || !ResolveDirection(IR, Op->Direction, FE, &Dir)) {
         return false;
       }
       // The ELEMENT size is the op's $Size arg (STOSOp's OpSizeFromSrc);
@@ -4237,14 +4259,16 @@ bool ModuleBuilder::Emit(const IR::IRListView* IR, uint64_t EntryRIP, uint64_t C
         // The direction-aware element loop: remaining count, original count,
         // the per-iteration offset, and the total bytes for result routing —
         // plus one scratch per dynamic result register (the final
-        // destination/source addresses route through them, the F3d finding:
-        // a budget of 4 spilled the results into the v128 FPR locals).
-        ScratchCount += 6;
+        // destination/source addresses route through them) and one for a
+        // materialized inline-constant direction (the F3d finding: a budget
+        // of 4 spilled the results into the v128 FPR locals).
+        ScratchCount += 7;
         break;
       case IR::IROps::OP_MEMSET:
-        // The same loop plus the masked element value: five i32 temps; the
-        // final address routes through the node's own local.
-        ScratchCount += 5;
+        // The same loop plus the masked element value: five i32 temps, the
+        // final address routes through the node's own local, and a
+        // materialized inline-constant direction is the sixth.
+        ScratchCount += 6;
         break;
       case IR::IROps::OP_F80CMPVALUE:
       case IR::IROps::OP_F80CMPSTACK:
