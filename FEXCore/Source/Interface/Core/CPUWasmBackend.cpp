@@ -4234,10 +4234,17 @@ bool ModuleBuilder::Emit(const IR::IRListView* IR, uint64_t EntryRIP, uint64_t C
         ++ScratchCount; // the 64-bit product's high half
         break;
       case IR::IROps::OP_MEMCPY:
-      case IR::IROps::OP_MEMSET:
         // The direction-aware element loop: remaining count, original count,
-        // the per-iteration offset, and the total bytes for result routing.
-        ScratchCount += 4;
+        // the per-iteration offset, and the total bytes for result routing —
+        // plus one scratch per dynamic result register (the final
+        // destination/source addresses route through them, the F3d finding:
+        // a budget of 4 spilled the results into the v128 FPR locals).
+        ScratchCount += 6;
+        break;
+      case IR::IROps::OP_MEMSET:
+        // The same loop plus the masked element value: five i32 temps; the
+        // final address routes through the node's own local.
+        ScratchCount += 5;
         break;
       case IR::IROps::OP_F80CMPVALUE:
       case IR::IROps::OP_F80CMPSTACK:
