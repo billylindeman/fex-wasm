@@ -2809,7 +2809,7 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
           !ResolveArg(IR, Op->Length, FE, &Length) || !ResolveArg(IR, Op->Direction, FE, &Dir)) {
         return false;
       }
-      const uint32_t ElemBytes = IR::OpSizeToSize(IROp->Size);
+      const uint32_t ElemBytes = IR::OpSizeToSize(Op->Size);
       if (ElemBytes != 1 && ElemBytes != 2 && ElemBytes != 4) {
         LogMan::Msg::EFmt("WasmBackend: MemCpy with unsupported element size {}", ElemBytes);
         return false;
@@ -2922,7 +2922,12 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
           !ResolveArg(IR, Op->Length, FE, &Length) || !ResolveArg(IR, Op->Direction, FE, &Dir)) {
         return false;
       }
-      const uint32_t ElemBytes = IR::OpSizeToSize(IROp->Size);
+      // The ELEMENT size is the op's $Size arg (STOSOp's OpSizeFromSrc);
+      // the IROp header's Size is the DestSize (the returned final
+      // address, i64Bit) — reading it here made every real invocation
+      // loud-fail (the F3d finding: "MemSet with unsupported element
+      // size 8" on a plain rep stosd).
+      const uint32_t ElemBytes = IR::OpSizeToSize(Op->Size);
       if (ElemBytes != 1 && ElemBytes != 2 && ElemBytes != 4) {
         LogMan::Msg::EFmt("WasmBackend: MemSet with unsupported element size {}", ElemBytes);
         return false;
