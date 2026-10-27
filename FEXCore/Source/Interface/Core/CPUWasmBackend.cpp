@@ -524,18 +524,22 @@ private:
     return true;
   }
 
-  // The Direction arg of MemSet/MemCpy may be an inline constant (the
-  // frontend folds a statically-known DF — e.g. the STD-preloaded backward
-  // rep movs). An inline-constant node has no emitted def, so plain
-  // ResolveArg maps it to a never-written local (reads 0 → the loop's
-  // direction check always takes the forward branch — the F3d
-  // str-rep-movsb-bwd finding). Materialize the constant into a scratch
-  // local instead; the caller's scratch budget covers it.
+  // The Direction arg of MemSet/MemCpy may be a folded constant node — the
+  // frontend's known-DF path lands as an OP_INLINECONSTANT node (the D4
+  // str-rep-movsb-bwd finding: the STD-preloaded backward rep movs'
+  // direction arrives as `InlineConstant 0xffffffffffffffff`). Such a node
+  // has no dynamic-register def, so plain ResolveArg maps it to a
+  // never-written local (reads 0 → the loop's direction check and the
+  // result select both take the forward branch). Materialize the constant
+  // into a scratch local instead; the caller's scratch budget covers it.
+  // OP_CONSTANT is accepted alongside it for the same reason.
   bool ResolveDirection(const IR::IRListView* IR, IR::OrderedNodeWrapper Arg, FunctionEmitter& FE, uint32_t* LocalOut) {
     if (!Arg.IsImmediate()) {
       const auto OpHeader = IR->GetOp<IR::IROp_Header>(Arg);
-      if (OpHeader->Op == IR::IROps::OP_INLINECONSTANT) {
-        const auto Value = static_cast<int32_t>(OpHeader->C<IR::IROp_InlineConstant>()->Constant);
+      if (OpHeader->Op == IR::IROps::OP_CONSTANT || OpHeader->Op == IR::IROps::OP_INLINECONSTANT) {
+        const auto Value = static_cast<int32_t>(OpHeader->Op == IR::IROps::OP_CONSTANT
+            ? OpHeader->C<IR::IROp_Constant>()->Constant
+            : OpHeader->C<IR::IROp_InlineConstant>()->Constant);
         PushU32Const(FE.Body, Value);
         const uint32_t Scratch = FE.AllocScratch();
         PushLocalSet(FE.Body, Scratch);
@@ -2901,12 +2905,15 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       FE.Body.push_back(0x0B);          // end block
       // Results: final addresses = base + Length*Dir.
       // -(Count << s) if Dir < 0 else (Count << s); i32.select pops
-      // [val1, val2, cond] — condition last.
+      // [val1, val2, cond] — condition last. The negation's 0 operand is
+      // pushed BEFORE the shifted count: sub pops the rhs first, and the
+      // landed order computed (Count<<s) - 0 — the forward result from both
+      // select arms (the F3d str-rep-movsb-bwd finding).
+      PushU32Const(FE.Body, 0);
       PushLocalGet(FE.Body, Count);
       PushU32Const(FE.Body, Shift);
       FE.Body.push_back(0x74);          // (Count << s)
-      PushU32Const(FE.Body, 0);
-      FE.Body.push_back(0x6B);          // i32.sub -> -(Count << s)
+      FE.Body.push_back(0x6B);          // 0 - (Count << s)
       PushLocalGet(FE.Body, Count);
       PushU32Const(FE.Body, Shift);
       FE.Body.push_back(0x74);          // (Count << s)
@@ -3013,12 +3020,13 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       PushVec(FE.Body, {0x0C, 0x00});   //   br 0 -> loop
       FE.Body.push_back(0x0B);          // end loop
       FE.Body.push_back(0x0B);          // end block
-      // Result: final address = Addr + Length*Dir (routed like MemCpy's).
+      // Result: final address = Addr + Length*Dir (routed like MemCpy's;
+      // the negation's 0 goes first — sub pops the rhs first).
+      PushU32Const(FE.Body, 0);
       PushLocalGet(FE.Body, Count);
       PushU32Const(FE.Body, Shift);
       FE.Body.push_back(0x74);
-      PushU32Const(FE.Body, 0);
-      FE.Body.push_back(0x6B);          // -(Count << s)
+      FE.Body.push_back(0x6B);          // 0 - (Count << s)
       PushLocalGet(FE.Body, Count);
       PushU32Const(FE.Body, Shift);
       FE.Body.push_back(0x74);
