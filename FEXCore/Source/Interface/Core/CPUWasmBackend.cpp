@@ -3555,6 +3555,38 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       PushLocalSet(FE.Body, Dest);
       break;
     }
+    case IR::IROps::OP_VMOV: {
+      // Copy the source vector, truncating to the op's effective size and
+      // zero-extending (the movd/movq partial-load shape: LoadXMMRegister's
+      // "extract the subregister" path). extract-lane + splat of the matching
+      // width is exactly that zero-extension. The size rides the header's
+      // Size field (the Arm64 DEF_OP(VMov) reads the same).
+      const uint32_t ElemBits = IR::OpSizeAsBits(IROp->Size);
+      uint32_t Src;
+      if (!ResolveArg(IR, IROp->C<IR::IROp_VMov>()->Source, FE, &Src)) {
+        return false;
+      }
+      UsesFPR = true;
+      if (ElemBits == 128) {
+        PushLocalGet(FE.Body, Src);
+      } else {
+        uint8_t Extract, Splat;
+        switch (ElemBits) {
+        case 8:  Extract = 0x16; Splat = 0x0F; break; // i8x16.extract_lane_u / i8x16.splat
+        case 16: Extract = 0x19; Splat = 0x10; break; // i16x8.extract_lane_u / i16x8.splat
+        case 32: Extract = 0x1B; Splat = 0x11; break; // i32x4.extract_lane / i32x4.splat
+        case 64: Extract = 0x1D; Splat = 0x12; break; // i64x2.extract_lane / i64x2.splat
+        default:
+          LogMan::Msg::EFmt("WasmBackend: VMov with unsupported element size {}", ElemBits);
+          return false;
+        }
+        PushLocalGet(FE.Body, Src);
+        PushVec(FE.Body, {0xFD, Extract, 0x00}); // lane 0
+        PushVec(FE.Body, {0xFD, Splat});
+      }
+      PushLocalSet(FE.Body, Dest);
+      break;
+    }
     case IR::IROps::OP_VEXTRACTTOGPR: {
       // movd/movq xmm -> GPR: raw bits of lane Index.
       const auto* Op = IROp->C<IR::IROp_VExtractToGPR>();
