@@ -1962,10 +1962,14 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       FE.Body.push_back(0x71); // i32.and
       FE.Body.push_back(0x6A); // i32.add
       PushLocalSet(FE.Body, Dest); // s in Dest (scratch use of the result local)
-      // N = sign bit of the masked sum
+      // N = sign bit of the masked sum, moved to the NZCV's N position
+      // (bit 31) — the same sub-32-bit shape defect the TestFlags lowering
+      // had (the F3e wall).
       PushLocalGet(FE.Body, Dest);
       PushU32Const(FE.Body, 1u << (Bits - 1));
       FE.Body.push_back(0x71); // i32.and
+      PushU32Const(FE.Body, 32 - Bits);
+      FE.Body.push_back(0x74); // i32.shl
       // Z = (sum & mask) == 0
       PushLocalGet(FE.Body, Dest);
       PushU32Const(FE.Body, (1u << Bits) - 1);
