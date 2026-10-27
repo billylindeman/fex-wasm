@@ -2847,22 +2847,26 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       FE.Body.push_back(0x74);          // i32.shl
       FE.Body.push_back(0x0B);          // end if
       PushLocalSet(FE.Body, Off);
-      // The element copy: [Src+Off] -> [Dest+Off].
-      PushU32Const(FE.Body, 0);
+      // The element copy: [Dest+Off] <- [Src+Off]. The wasm store pops
+      // [addr, value] with the value on top, so the destination address is
+      // pushed first and the load's result rides on top of it. (The landed
+      // shape pushed a stray i32.const 0 before each access, stored to
+      // address 0, and left the stack unbalanced; the 8-bit memargs also
+      // lacked their offset immediate — all three never exercised until the
+      // F3d walk.)
+      PushLocalGet(FE.Body, Dest);
+      PushLocalGet(FE.Body, Off);
+      FE.Body.push_back(0x6A);          // i32.add
       PushLocalGet(FE.Body, Src);
       PushLocalGet(FE.Body, Off);
       FE.Body.push_back(0x6A);          // i32.add
       switch (ElemBytes) {
-      case 1: PushVec(FE.Body, {0x2D, 0x00}); break; // i32.load8_u
+      case 1: PushVec(FE.Body, {0x2D, 0x00, 0x00}); break; // i32.load8_u
       case 2: PushVec(FE.Body, {0x2F, 0x01, 0x00}); break; // i32.load16_u
       case 4: PushVec(FE.Body, {0x28, 0x02, 0x00}); break; // i32.load
       }
-      PushU32Const(FE.Body, 0);
-      PushLocalGet(FE.Body, Dest);
-      PushLocalGet(FE.Body, Off);
-      FE.Body.push_back(0x6A);          // i32.add
       switch (ElemBytes) {
-      case 1: PushVec(FE.Body, {0x3A, 0x00}); break; // i32.store8
+      case 1: PushVec(FE.Body, {0x3A, 0x00, 0x00}); break; // i32.store8
       case 2: PushVec(FE.Body, {0x3B, 0x01, 0x00}); break; // i32.store16
       case 4: PushVec(FE.Body, {0x36, 0x02, 0x00}); break; // i32.store
       }
@@ -2971,13 +2975,12 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       FE.Body.push_back(0x74);
       FE.Body.push_back(0x0B);
       PushLocalSet(FE.Body, Off);
-      PushU32Const(FE.Body, 0);
       PushLocalGet(FE.Body, Addr);
       PushLocalGet(FE.Body, Off);
       FE.Body.push_back(0x6A);          // i32.add
       PushLocalGet(FE.Body, Elem);
       switch (ElemBytes) {
-      case 1: PushVec(FE.Body, {0x3A, 0x00}); break; // i32.store8
+      case 1: PushVec(FE.Body, {0x3A, 0x00, 0x00}); break; // i32.store8
       case 2: PushVec(FE.Body, {0x3B, 0x01, 0x00}); break; // i32.store16
       case 4: PushVec(FE.Body, {0x36, 0x02, 0x00}); break; // i32.store
       }
