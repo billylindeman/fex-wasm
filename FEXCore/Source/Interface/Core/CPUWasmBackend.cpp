@@ -1346,6 +1346,32 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       PushLocalSet(FE.Body, Dest);
       break;
     }
+    case IR::IROps::OP_ANDN: {
+      // Src1 & ~Src2 — the IR.json contract, pinned by the AArch64 host
+      // lowering (ALUOps.cpp DEF_BINOP_WITH_CONSTANT(Andn, bic, bic):
+      // `bic dest, Src1, Src2`). Wasm has no and-not primitive, so invert
+      // Src2 via the OP_NOT form (the -1 xor) and AND. Emitted by the
+      // sub-32-bit ADD/SUB/SBB/ADC flag paths (CalculateOF with a constant
+      // source: `sbb $0xff,%al` in libstdc++'s _M_widen_init — the FD3dc
+      // wall). Size is i32 or i64 per the IR's EmitValidation; the wasm
+      // backend's GPR model types every Andn node I32 (the i64 group is
+      // the fild/movq special cases only), so the i64 form is a named gap.
+      if (IROp->Size != IR::OpSize::i32Bit) {
+        LogMan::Msg::EFmt("WasmBackend: Andn with unsupported size {} (only the 32-bit GPR model is lowered)", IR::OpSizeAsBits(IROp->Size));
+        return false;
+      }
+      uint32_t A, B;
+      if (!ResolveArg(IR, IROp->Args[0], FE, &A) || !ResolveArg(IR, IROp->Args[1], FE, &B)) {
+        return false;
+      }
+      PushLocalGet(FE.Body, A);
+      PushLocalGet(FE.Body, B);
+      PushU32Const(FE.Body, 0xFFFFFFFF);
+      FE.Body.push_back(0x73); // i32.xor (bitwise NOT of Src2)
+      FE.Body.push_back(0x71); // i32.and — Src1 & ~Src2
+      PushLocalSet(FE.Body, Dest);
+      break;
+    }
     case IR::IROps::OP_ORLSHR: {
       // Src1 | (Src2 >> BitShift) — the segment-base merge idiom
       // (UpdatePrefixFromSegment's high-word extraction). The 32-bit model:
