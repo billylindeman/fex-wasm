@@ -3677,6 +3677,47 @@ bool ModuleBuilder::EmitCodeBlock(const IR::IRListView* IR, uint64_t EntryRIP, u
       PushLocalSet(FE.Body, Dest);
       break;
     }
+    case IR::IROps::OP_VDUPELEMENT: {
+      // Broadcast one element across the whole register (the pshufd imm-0
+      // splat among others): extract_lane + splat is wasm's literal
+      // spelling of the AArch64 dup ground truth (JIT/VectorOps.cpp
+      // DEF_OP(VDupElement)) — the same two primitives OP_VMOV's
+      // zero-extending copy rides. The FSbb2 wall: the d3d9-l6v5u5 write
+      // loop's `pshufd $0x0,%xmm0,%xmm0` (rip 0x4027ce) lifted to
+      // VDupElement and the emit refused (unsupported IR op 217, err -2).
+      const auto* Op = IROp->C<IR::IROp_VDupElement>();
+      uint32_t Src;
+      if (!ResolveArg(IR, Op->Vector, FE, &Src)) {
+        return false;
+      }
+      UsesFPR = true;
+      const uint32_t RegBits = IR::OpSizeAsBits(IROp->Size);
+      if (RegBits != 128) {
+        // The 128-bit form is the only one the SSE frontend emits
+        // (Single128Bit4ByteVectorShuffle's broadcast shapes); a smaller
+        // register size would need the splat truncated — loud refusal over
+        // silently-wrong wasm (the Andn/Orlshr named-refusal rule).
+        LogMan::Msg::EFmt("WasmBackend: VDupElement with unsupported register size {}", RegBits);
+        return false;
+      }
+      const uint32_t ElemBits = IR::OpSizeAsBits(IROp->ElementSize);
+      uint8_t Extract, Splat;
+      switch (ElemBits) {
+        case 8:  Extract = 0x16; Splat = 0x0F; break; // i8x16.extract_lane_u / i8x16.splat
+        case 16: Extract = 0x19; Splat = 0x10; break; // i16x8.extract_lane_u / i16x8.splat
+        case 32: Extract = 0x1B; Splat = 0x11; break; // i32x4.extract_lane / i32x4.splat
+        case 64: Extract = 0x1D; Splat = 0x12; break; // i64x2.extract_lane / i64x2.splat
+        default:
+          LogMan::Msg::EFmt("WasmBackend: VDupElement with unsupported element size {}", ElemBits);
+          return false;
+      }
+      PushLocalGet(FE.Body, Src);
+      PushVec(FE.Body, {0xFD, Extract});
+      PushULEB(FE.Body, Op->Index);
+      PushVec(FE.Body, {0xFD, Splat});
+      PushLocalSet(FE.Body, Dest);
+      break;
+    }
     case IR::IROps::OP_VZIP: {
       // DestVector = the low-half interleave (the punpckl* family): the
       // dest's even lanes keep VectorLower's, the odd lanes take
